@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"autotask/cmd/at"
+	"fmt"
 	"os"
-	"os/exec"
 
+	"github.com/moby/moby/client"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -29,11 +30,27 @@ func AutoTaskCommand() *cobra.Command {
 				return err
 			}
 			task := tasks.Tasks[task_name]
-			c := exec.Command("sh", "-c", task.Run)
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
+			fmt.Printf("运行任务：%s\n", task.Name)
+			cli, err := client.New()
+			if err != nil {
 				return err
+			}
+			defer cli.Close()
+			fmt.Printf("请求拉取镜像：%s\n", task.Image)
+			pull, err := cli.ImagePull(cmd.Context(), task.Image, client.ImagePullOptions{})
+			if err != nil {
+				return err
+			}
+			defer pull.Close()
+			fmt.Println("开始下载")
+			for message, err := range pull.JSONMessages(cmd.Context()) {
+				if err != nil {
+					return err
+				}
+				if message.Error != nil {
+					return fmt.Errorf("拉取镜像失败：%s", message.Error.Message)
+				}
+				fmt.Println(message.Status)
 			}
 			return nil
 		},
