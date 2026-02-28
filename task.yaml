@@ -1,7 +1,0 @@
-tasks:
-  test-task:
-    name: 测试任务
-    image: image-name
-    run: |
-      echo "你好，世界"
-      echo "打印第二段文本"
