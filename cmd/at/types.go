@@ -1,4 +1,4 @@
-package main
+package at
 
 type Task struct {
 	Name  string `yaml:"name"`
