@@ -3,13 +3,13 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import type { Task, TaskRelation } from "../types/task";
 
 /**
- * BlueprintCanvas 组件 - 可拖拽的蓝图画布
- * 支持拖拽平移、缩放、显示任务节点和关系连线
+ * BlueprintCanvas 组件 - 任务流程蓝图
+ * 以选中任务为最终任务，显示所有前置任务流程
  */
 
 interface Props {
-  /** 中心任务 */
-  centerTask: Task;
+  /** 最终任务（从看板选中的任务） */
+  targetTask: Task;
   /** 所有相关任务 */
   relatedTasks: Task[];
   /** 任务关系列表 */
@@ -19,8 +19,6 @@ interface Props {
 const props = defineProps<Props>();
 
 const emit = defineEmits<{
-  /** 点击任务节点 */
-  (e: "selectTask", taskId: string): void;
   /** 关闭蓝图 */
   (e: "close"): void;
 }>();
@@ -43,58 +41,98 @@ const dragStartY = ref(0);
 const dragStartOffsetX = ref(0);
 const dragStartOffsetY = ref(0);
 
-/** 画布容器引用 */
-// const canvasRef = ref<HTMLDivElement | null>(null);
-
 // ==================== 节点位置计算 ====================
 
 /**
  * 计算任务节点在画布上的位置
- * 使用简单的层级布局算法
+ * 以最终任务为基准，向左展开所有前置任务
  */
 const nodePositions = computed<Map<string, { x: number; y: number }>>(() => {
   const positions = new Map<string, { x: number; y: number }>();
-  // const taskMap = new Map(props.relatedTasks.map((t) => [t.id, t]));
 
-  // 构建层级关系
+  // 构建层级关系（基于依赖深度，从后往前）
   const levels = new Map<string, number>();
   const visited = new Set<string>();
 
-  // 计算每个任务的层级（基于依赖深度）
+  // 计算每个任务的层级（距离最终任务的步数）
+  // 最终任务 = 0，每往前一步前置任务层级 +1
+  // 关系格式: { from: "依赖方", to: "被依赖方", type: "depends_on" }
+  // 即 "from" depends_on "to"，"to" 是 "from" 的前置任务
   function calculateLevel(taskId: string): number {
     if (levels.has(taskId)) return levels.get(taskId)!;
-    if (visited.has(taskId)) return 0;
+    if (visited.has(taskId)) return -1;
     visited.add(taskId);
 
-    // 查找当前任务依赖的上游任务
-    const upstreamRelations = props.relations.filter(
-      (r) => r.to === taskId && r.type === "depends_on",
-    );
-
-    if (upstreamRelations.length === 0) {
+    // 如果是最终任务，层级为 0
+    if (taskId === props.targetTask.id) {
       levels.set(taskId, 0);
       return 0;
     }
 
-    let maxUpstreamLevel = -1;
-    for (const rel of upstreamRelations) {
-      const upstreamLevel = calculateLevel(rel.from);
-      maxUpstreamLevel = Math.max(maxUpstreamLevel, upstreamLevel);
+    // 查找依赖当前任务的下游任务（即谁依赖了当前任务）
+    // 关系: from 依赖 to，所以 to 的下游是 from
+    const downstreamRelations = props.relations.filter(
+      (r) => r.to === taskId && r.type === "depends_on",
+    );
+
+    if (downstreamRelations.length === 0) {
+      // 没有下游任务且不是最终任务，孤立任务（不参与布局）
+      levels.set(taskId, -1);
+      return -1;
     }
 
-    const level = maxUpstreamLevel + 1;
+    // 递归计算下游任务的层级，取最小值 + 1
+    // （因为当前任务必须在下游任务之前完成）
+    let minDownstreamLevel = 999;
+    for (const rel of downstreamRelations) {
+      const downstreamLevel = calculateLevel(rel.from);
+      if (downstreamLevel !== -1) {
+        minDownstreamLevel = Math.min(minDownstreamLevel, downstreamLevel);
+      }
+    }
+
+    if (minDownstreamLevel === 999) {
+      // 所有下游任务都无法到达目标，孤立任务
+      levels.set(taskId, -1);
+      return -1;
+    }
+
+    // 当前层级 = 下游任务的最小层级 + 1
+    // （当前任务在下游任务之前，所以层级更大）
+    const level = minDownstreamLevel + 1;
     levels.set(taskId, level);
     return level;
   }
 
-  // 计算所有任务的层级
+  // 计算所有任务的层级（只计算与目标任务相关的）
+  // 先确保目标任务有层级
+  calculateLevel(props.targetTask.id);
+
+  // 计算所有相关任务的层级
   for (const task of props.relatedTasks) {
     calculateLevel(task.id);
   }
 
+  // 找出最大层级（最长依赖链）
+  let maxLevel = 0;
+  for (const level of levels.values()) {
+    if (level !== -1) {
+      maxLevel = Math.max(maxLevel, level);
+    }
+  }
+
+  // 标准化层级，使最终任务在最右侧（最大正值）
+  // 反转层级：目标任务(0) -> maxLevel, 前置任务(n) -> maxLevel - n
+  const normalizedLevels = new Map<string, number>();
+  for (const [taskId, level] of levels.entries()) {
+    if (level !== -1) {
+      normalizedLevels.set(taskId, maxLevel - level);
+    }
+  }
+
   // 按层级分组
   const levelGroups = new Map<number, string[]>();
-  for (const [taskId, level] of levels.entries()) {
+  for (const [taskId, level] of normalizedLevels.entries()) {
     if (!levelGroups.has(level)) {
       levelGroups.set(level, []);
     }
@@ -106,6 +144,8 @@ const nodePositions = computed<Map<string, { x: number; y: number }>>(() => {
   const nodeHeight = 100; // 节点高度
   const nodeGap = 40; // 节点间距
 
+  const maxGroupLevel = Math.max(...Array.from(levelGroups.keys()), 0);
+
   for (const [level, taskIds] of levelGroups.entries()) {
     const totalHeight =
       taskIds.length * nodeHeight + (taskIds.length - 1) * nodeGap;
@@ -113,25 +153,10 @@ const nodePositions = computed<Map<string, { x: number; y: number }>>(() => {
 
     for (let i = 0; i < taskIds.length; i++) {
       const taskId = taskIds[i];
-      const x =
-        level * levelWidth -
-        (Math.max(...Array.from(levelGroups.keys())) * levelWidth) / 2;
+      // 最终任务在最右侧（x最大）
+      const x = (level - maxGroupLevel / 2) * levelWidth;
       const y = startY + i * (nodeHeight + nodeGap) + nodeHeight / 2;
       positions.set(taskId, { x, y });
-    }
-  }
-
-  // 确保中心任务在画布中心
-  if (positions.has(props.centerTask.id)) {
-    const centerPos = positions.get(props.centerTask.id)!;
-    const centerOffsetX = -centerPos.x;
-    const centerOffsetY = -centerPos.y;
-
-    for (const [taskId, pos] of positions.entries()) {
-      positions.set(taskId, {
-        x: pos.x + centerOffsetX,
-        y: pos.y + centerOffsetY,
-      });
     }
   }
 
@@ -218,13 +243,6 @@ function handleWheel(event: WheelEvent) {
 }
 
 /**
- * 处理任务节点点击
- */
-function handleNodeClick(taskId: string) {
-  emit("selectTask", taskId);
-}
-
-/**
  * 获取任务节点位置样式
  */
 function getNodeStyle(taskId: string) {
@@ -263,15 +281,14 @@ onUnmounted(() => {
 
 <template>
   <div
-    ref="canvasRef"
     class="blueprint-canvas"
     @mousedown="handleMouseDown"
     @wheel="handleWheel"
   >
     <!-- 工具栏 -->
     <div class="canvas-toolbar">
-      <button class="toolbar-btn" @click="$emit('close')">← 返回</button>
-      <span class="toolbar-title">{{ centerTask.name }} - 任务蓝图</span>
+      <button class="toolbar-btn" @click="emit('close')">← 返回</button>
+      <span class="toolbar-title">{{ targetTask.name }} - 任务流程</span>
       <div class="toolbar-actions">
         <button class="toolbar-btn" @click="scale = Math.min(2, scale + 0.1)">
           +
@@ -290,14 +307,6 @@ onUnmounted(() => {
         >
           重置
         </button>
-      </div>
-    </div>
-
-    <!-- 图例 -->
-    <div class="legend">
-      <div class="legend-item">
-        <span class="legend-line" style="background: #409eff"></span>
-        <span>任务依赖</span>
       </div>
     </div>
 
@@ -346,13 +355,11 @@ onUnmounted(() => {
         v-for="task in relatedTasks"
         :key="task.id"
         class="task-node"
-        :class="{ center: task.id === centerTask.id }"
+        :class="{ target: task.id === targetTask.id }"
         :style="getNodeStyle(task.id)"
-        @click.stop="handleNodeClick(task.id)"
       >
         <div class="node-header">
           <span class="node-id">#{{ task.id }}</span>
-          <span v-if="task.id === centerTask.id" class="node-badge">中心</span>
         </div>
         <div class="node-name">{{ task.name }}</div>
         <div class="node-image">{{ task.image }}</div>
@@ -433,35 +440,6 @@ onUnmounted(() => {
   font-family: monospace;
 }
 
-/* 图例 */
-.legend {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  background: #fff;
-  border-radius: 8px;
-  padding: 12px 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 100;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #555;
-}
-
-.legend-line {
-  width: 24px;
-  height: 3px;
-  border-radius: 2px;
-}
-
 /* 画布内容 */
 .canvas-content {
   position: absolute;
@@ -489,7 +467,7 @@ onUnmounted(() => {
   border: 2px solid #e0e0e0;
   border-radius: 10px;
   padding: 14px;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.2s ease;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
@@ -497,13 +475,13 @@ onUnmounted(() => {
 .task-node:hover {
   border-color: #409eff;
   box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
-  transform: translate(-50%, -50%) scale(1.02);
 }
 
-.task-node.center {
-  border-color: #409eff;
-  background: #f0f7ff;
-  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.2);
+/* 最终任务高亮样式 */
+.task-node.target {
+  border-color: #67c23a;
+  background: #f0f9eb;
+  box-shadow: 0 4px 16px rgba(103, 194, 58, 0.2);
 }
 
 .node-header {
@@ -518,15 +496,6 @@ onUnmounted(() => {
   font-weight: 500;
   color: #aaa;
   font-family: "SF Mono", Monaco, monospace;
-}
-
-.node-badge {
-  padding: 2px 8px;
-  background: #409eff;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 4px;
 }
 
 .node-name {

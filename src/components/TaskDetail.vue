@@ -133,7 +133,7 @@ function handleViewBlueprint() {
 .blueprint-btn {
   position: absolute;
   top: 0;
-  right: 0;
+  right: 40px;
   display: flex;
   align-items: center;
   gap: 6px;

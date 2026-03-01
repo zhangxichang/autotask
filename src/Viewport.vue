@@ -26,8 +26,8 @@ const searchQuery = ref("");
 /** 是否显示蓝图视图 */
 const showBlueprint = ref(false);
 
-/** 蓝图中心任务ID */
-const blueprintCenterTaskId = ref<string | null>(null);
+/** 蓝图目标/最终任务ID */
+const blueprintTargetTaskId = ref<string | null>(null);
 
 // ==================== 计算属性 ====================
 
@@ -57,26 +57,26 @@ const filteredTasks = computed<Task[]>(() => {
   });
 });
 
-/** 蓝图中心任务 */
-const blueprintCenterTask = computed<Task | null>(() => {
-  const id = blueprintCenterTaskId.value;
+/** 蓝图目标/最终任务 */
+const blueprintTargetTask = computed<Task | null>(() => {
+  const id = blueprintTargetTaskId.value;
   if (id === null) return null;
   return allTasks.value.find((t) => t.id === id) ?? null;
 });
 
-/** 蓝图相关任务列表 */
+/** 蓝图相关任务列表（目标任务的完整依赖链） */
 const blueprintRelatedTasks = computed<Task[]>(() => {
-  const centerId = blueprintCenterTaskId.value;
-  if (centerId === null) return [];
-  const relatedIds = getRelatedTaskIds(centerId);
+  const targetId = blueprintTargetTaskId.value;
+  if (targetId === null) return [];
+  const relatedIds = getRelatedTaskIds(targetId);
   return allTasks.value.filter((t) => relatedIds.has(t.id));
 });
 
 /** 蓝图相关关系列表 */
 const blueprintRelations = computed(() => {
-  const centerId = blueprintCenterTaskId.value;
-  if (centerId === null) return [];
-  const relatedIds = getRelatedTaskIds(centerId);
+  const targetId = blueprintTargetTaskId.value;
+  if (targetId === null) return [];
+  const relatedIds = getRelatedTaskIds(targetId);
   return mockTaskRelations.filter(
     (r) => relatedIds.has(r.from) && relatedIds.has(r.to),
   );
@@ -109,10 +109,10 @@ function closeDetail(): void {
 
 /**
  * 打开蓝图视图
- * @param taskId - 中心任务ID
+ * @param taskId - 目标/最终任务ID
  */
 function openBlueprint(taskId: string): void {
-  blueprintCenterTaskId.value = taskId;
+  blueprintTargetTaskId.value = taskId;
   showBlueprint.value = true;
 }
 
@@ -121,15 +121,7 @@ function openBlueprint(taskId: string): void {
  */
 function closeBlueprint(): void {
   showBlueprint.value = false;
-  blueprintCenterTaskId.value = null;
-}
-
-/**
- * 在蓝图中选择任务 - 切换中心任务
- * @param taskId - 任务ID
- */
-function handleBlueprintTaskSelect(taskId: string): void {
-  blueprintCenterTaskId.value = taskId;
+  blueprintTargetTaskId.value = null;
 }
 </script>
 
@@ -183,12 +175,11 @@ function handleBlueprintTaskSelect(taskId: string): void {
     <!-- 蓝图视图（全屏覆盖） -->
     <transition name="blueprint">
       <BlueprintCanvas
-        v-if="showBlueprint && blueprintCenterTask"
-        :center-task="blueprintCenterTask"
+        v-if="showBlueprint && blueprintTargetTask"
+        :target-task="blueprintTargetTask"
         :related-tasks="blueprintRelatedTasks"
         :relations="blueprintRelations"
         @close="closeBlueprint"
-        @select-task="handleBlueprintTaskSelect"
       />
     </transition>
   </div>
@@ -319,7 +310,7 @@ function handleBlueprintTaskSelect(taskId: string): void {
   align-items: center;
   justify-content: center;
   transition: all 0.2s;
-  z-index: 10;
+  z-index: 1;
 }
 
 .close-btn:hover {

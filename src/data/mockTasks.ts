@@ -195,33 +195,29 @@ export const mockTaskRelations: TaskRelation[] = [
 ];
 
 /**
- * 获取与指定任务相关的所有任务ID（包括上游和下游）
- * @param centerTaskId - 中心任务ID
- * @returns 相关任务ID集合
+ * 获取目标任务的完整前置依赖链（所有上游任务）
+ * @param targetTaskId - 目标任务ID
+ * @returns 相关任务ID集合（包括目标任务本身和所有前置任务）
  */
-export function getRelatedTaskIds(centerTaskId: string): Set<string> {
-  const relatedIds = new Set<string>([centerTaskId]);
+export function getRelatedTaskIds(targetTaskId: string): Set<string> {
+  const relatedIds = new Set<string>([targetTaskId]);
   const visited = new Set<string>();
-  const queue: string[] = [centerTaskId];
+  const queue: string[] = [targetTaskId];
 
   while (queue.length > 0) {
     const currentId = queue.shift()!;
     if (visited.has(currentId)) continue;
     visited.add(currentId);
 
-    // 查找与当前任务相关的所有关系
+    // 只查找当前任务依赖的上游任务（前置任务）
+    // 关系格式: { from: "依赖方", to: "被依赖方", type: "depends_on" }
+    // 即 "from" depends_on "to"，"to" 是 "from" 的前置任务
     for (const relation of mockTaskRelations) {
-      if (relation.from === currentId) {
-        // 当前任务的下游任务
+      if (relation.from === currentId && relation.type === "depends_on") {
+        // relation.to 是当前任务依赖的前置任务
         if (!relatedIds.has(relation.to)) {
           relatedIds.add(relation.to);
           queue.push(relation.to);
-        }
-      } else if (relation.to === currentId) {
-        // 当前任务的上游任务
-        if (!relatedIds.has(relation.from)) {
-          relatedIds.add(relation.from);
-          queue.push(relation.from);
         }
       }
     }
