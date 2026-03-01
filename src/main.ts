@@ -1,4 +1,5 @@
+import "./style.css";
 import { createApp } from "vue";
-import App from "./App.vue";
+import Viewport from "./Viewport.vue";
 
-createApp(App).mount(document.body);
+createApp(Viewport).mount(document.body);
