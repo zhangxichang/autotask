@@ -1,17 +1,17 @@
 package main
 
 import (
+	app "autotask/modules"
 	"fmt"
 	"os"
 
-	"autotask/cmd"
+	tea "charm.land/bubbletea/v2"
 )
 
 func main() {
-	at_cmd := cmd.AutoTaskCommand()
-	at_cmd.AddCommand(cmd.VersionCommand())
-	if err := at_cmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "错误：%v\n", err)
+	app := tea.NewProgram(app.New())
+	if _, err := app.Run(); err != nil {
+		fmt.Printf("应用程序错误：%v", err)
 		os.Exit(-1)
 	}
 }
